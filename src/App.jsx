@@ -608,7 +608,7 @@ Return ONLY the JSON object, no markdown, no extra text.`;
           "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
         },
         body: JSON.stringify({
-          model: "meta-llama/llama-3.1-8b-instruct:free",
+          model: "openrouter/auto",
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -657,7 +657,7 @@ Return ONLY the message text, nothing else.`;
           "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
         },
         body: JSON.stringify({
-          model: "meta-llama/llama-3.1-8b-instruct:free",
+          model: "openrouter/auto",
           messages: [{ role: "user", content: prompt }],
         }),
       });
