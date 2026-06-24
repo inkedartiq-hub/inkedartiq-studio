@@ -599,19 +599,21 @@ URL: ${auditInput.listingUrl || "(not provided)"}
 
 Return ONLY the JSON object, no markdown, no extra text.`;
 
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent`, {
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          model: "google/gemini-2.0-flash-exp:free",
+          messages: [{ role: "user", content: prompt }],
         }),
       });
       const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const text = data.choices?.[0]?.message?.content || "";
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
       setAiResult(parsed);
@@ -646,19 +648,21 @@ Rules:
 
 Return ONLY the message text, nothing else.`;
 
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent`, {
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          model: "google/gemini-2.0-flash-exp:free",
+          messages: [{ role: "user", content: prompt }],
         }),
       });
       const data = await res.json();
-      const msg = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const msg = data.choices?.[0]?.message?.content?.trim();
       setPitchMsg(msg);
     } catch (e) {
       setPitchMsg("Failed to generate pitch. Try again.");
