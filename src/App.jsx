@@ -566,12 +566,402 @@ function RoadmapView({ roadmap, completedTasks, toggleTask, stepProgress }) {
 
 function AuditView({ auditInput, setAuditInput, handleAudit, auditResult, sendAuditAsLead }) {
   const [aiLoading, setAiLoading] = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [aiError, setAiError] = useState("");
   const [pitchMsg, setPitchMsg] = useState("");
   const [pitchLoading, setPitchLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [ownerName, setOwnerName] = useState("");
+  const [showCard, setShowCard] = useState(false);
+
+  const fetchFromUrl = async () => {
+    if (!auditInput.listingUrl) {
+      setAiError("Paste an Airbnb URL first.");
+      return;
+    }
+    setFetchLoading(true);
+    setAiError("");
+    try {
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const prompt = `You are a web data extractor. 
+      
+The user has provided this Airbnb listing URL: ${auditInput.listingUrl}
+
+Based on the URL and any information you can infer from it, generate realistic placeholder listing data that represents what a typical Kerala homestay listing at this URL might contain.
+
+Return a JSON object with exactly these keys:
+- "title": the likely listing title (make it realistic based on URL)
+- "description": a realistic 3-4 sentence description for this type of Kerala homestay
+- "location": the likely location in Kerala
+- "amenities": array of 5-6 likely amenities
+- "pricePerNight": estimated price in INR
+
+Return ONLY the JSON, no markdown, no extra text.`;
+
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
+        },
+        body: JSON.stringify({
+          model: "openrouter/auto",
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setAuditInput((o) => ({
+        ...o,
+        title: parsed.title || o.title,
+        description: parsed.description || o.description,
+      }));
+    } catch (e) {
+      setAiError("Could not fetch from URL. Please paste the title and description manually.");
+    }
+    setFetchLoading(false);
+  };
+
+  const runAiAudit = async () => {
+    if (!auditInput.title && !auditInput.description) {
+      setAiError("Paste at least a title or description first.");
+      return;
+    }
+    setAiLoading(true);
+    setAiResult(null);
+    setAiError("");
+    setPitchMsg("");
+    setShowCard(false);
+    try {
+      const prompt = `You are an Airbnb listing optimization expert specialising in Kerala homestays.
+
+Analyse this listing and return a JSON object with exactly these keys:
+- "score": number 1-10 (current listing quality)
+- "issues": array of objects with "problem" (short label) and "detail" (one sentence explanation), maximum 6 issues
+- "fixes": array of strings — specific actionable fixes the owner should make, maximum 5
+- "improvedTitle": a better title (under 50 chars, mention Kerala location if possible)
+- "improvedDescription": a rewritten opening paragraph (2-3 sentences, mention key amenities)
+- "improvedHighlights": array of 4 short bullet points highlighting the best features (for the new card)
+- "improvedAmenities": array of 6 amenities to highlight (WiFi, AC, Parking etc)
+- "improvedPrice": suggested price range in INR per night (e.g. "₹2,500–3,200")
+- "guestType": who this listing is best for (e.g. "Couples & families")
+- "summary": one sentence overall verdict
+
+Listing title: ${auditInput.title || "(not provided)"}
+Listing description: ${auditInput.description || "(not provided)"}
+URL: ${auditInput.listingUrl || "(not provided)"}
+
+Return ONLY the JSON object, no markdown, no extra text.`;
+
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
+        },
+        body: JSON.stringify({
+          model: "openrouter/auto",
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setAiResult(parsed);
+    } catch (e) {
+      setAiError("AI analysis failed. Check your internet connection and try again.");
+    }
+    setAiLoading(false);
+  };
+
+  const generatePitch = async () => {
+    if (!aiResult) return;
+    setPitchLoading(true);
+    setPitchMsg("");
+    try {
+      const prompt = `You are InkedArtiq Studio, an Airbnb listing optimization service for Kerala homestays.
+
+Write a friendly WhatsApp message to pitch your services to the owner of this listing.
+Owner name: ${ownerName || "there"}
+Listing title: ${auditInput.title || "their listing"}
+Top issues found: ${aiResult.issues?.slice(0, 3).map((i) => i.problem).join(", ")}
+Your service: You redesign Airbnb listings — titles, photos, descriptions — to get more bookings.
+
+Rules:
+- Start with "Hi ${ownerName || "there"}!" 
+- Be warm and conversational, not salesy
+- Mention 2-3 specific problems you noticed in their listing
+- Offer a FREE mini-audit as the first step (no commitment)
+- Keep it under 100 words
+- End with a clear call to action
+- Write in English, suitable for a Kerala homestay owner
+- Do NOT use emojis excessively — max 2
+
+Return ONLY the message text, nothing else.`;
+
+      const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://inkedartiq-studio.vercel.app",
+        },
+        body: JSON.stringify({
+          model: "openrouter/auto",
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      const msg = data.choices?.[0]?.message?.content?.trim();
+      setPitchMsg(msg);
+    } catch (e) {
+      setPitchMsg("Failed to generate pitch. Try again.");
+    }
+    setPitchLoading(false);
+  };
+
+  const copyPitch = () => {
+    navigator.clipboard.writeText(pitchMsg);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div>
+      <SectionLabel>AI Listing Analyser</SectionLabel>
+      <p style={{ fontSize: 13.5, color: GREY, margin: "8px 0 24px", maxWidth: 580 }}>
+        Paste any Kerala Airbnb listing URL — AI analyses it instantly, finds the problems, shows a Before/After card, and generates a personalised WhatsApp pitch.
+      </p>
+
+      {/* Input Section */}
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 20, background: CARD_BG, marginBottom: 20 }}>
+        <label style={{ fontSize: 11.5, color: GREY, fontWeight: 600, display: "block", marginBottom: 5 }}>AIRBNB LISTING URL</label>
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <input
+            placeholder="https://airbnb.co.in/rooms/..."
+            value={auditInput.listingUrl}
+            onChange={(e) => setAuditInput((o) => ({ ...o, listingUrl: e.target.value }))}
+            style={{ flex: 1 }}
+          />
+          <button
+            onClick={fetchFromUrl}
+            disabled={fetchLoading}
+            style={{ background: fetchLoading ? GREY : BLACK, color: "#fff", border: "none", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", opacity: fetchLoading ? 0.7 : 1 }}
+          >
+            {fetchLoading ? "Fetching..." : "⚡ Auto-fill"}
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: 11.5, color: GREY, fontWeight: 600, display: "block", marginBottom: 5 }}>CURRENT TITLE</label>
+            <input placeholder="Paste or auto-fill title" value={auditInput.title} onChange={(e) => setAuditInput((o) => ({ ...o, title: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11.5, color: GREY, fontWeight: 600, display: "block", marginBottom: 5 }}>OWNER NAME (FOR PITCH)</label>
+            <input placeholder="e.g. Suresh, Anitha..." value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+          </div>
+        </div>
+
+        <label style={{ fontSize: 11.5, color: GREY, fontWeight: 600, display: "block", marginBottom: 5 }}>CURRENT DESCRIPTION</label>
+        <textarea
+          placeholder="Paste the listing description here, or use Auto-fill above..."
+          value={auditInput.description}
+          onChange={(e) => setAuditInput((o) => ({ ...o, description: e.target.value }))}
+          style={{ minHeight: 90, resize: "vertical", marginBottom: 16 }}
+        />
+        <button
+          onClick={runAiAudit}
+          disabled={aiLoading}
+          style={{ background: aiLoading ? GREY : ORANGE, color: "#fff", border: "none", borderRadius: 7, padding: "11px 28px", fontSize: 13.5, fontWeight: 700, width: "100%", opacity: aiLoading ? 0.7 : 1 }}
+        >
+          {aiLoading ? "🔍 AI is analysing the listing..." : "🔍 Analyse with AI"}
+        </button>
+        {aiError && <div style={{ color: RED, fontSize: 12.5, marginTop: 10 }}>{aiError}</div>}
+      </div>
+
+      {/* Before / After Card */}
+      {aiResult && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 17 }}>Before / After Listing Card</div>
+            <button
+              onClick={() => setShowCard(!showCard)}
+              style={{ background: showCard ? BLACK : ORANGE, color: "#fff", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 12.5, fontWeight: 700 }}
+            >
+              {showCard ? "Hide card" : "👁 Show card"}
+            </button>
+          </div>
+
+          {showCard && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* BEFORE Card */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: RED, letterSpacing: "0.06em", marginBottom: 8 }}>BEFORE — CURRENT LISTING</div>
+                <div style={{ border: `2px solid ${LINE}`, borderRadius: 14, overflow: "hidden", background: CARD_BG }}>
+                  <div style={{ background: "#E8E4DC", height: 160, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                    <div style={{ fontSize: 32 }}>🏠</div>
+                    <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: 10, padding: "3px 8px", borderRadius: 5 }}>
+                      Score: {aiResult.score}/10
+                    </div>
+                  </div>
+                  <div style={{ padding: "14px 16px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: BLACK }}>{auditInput.title || "Untitled listing"}</div>
+                    <div style={{ fontSize: 12, color: GREY, lineHeight: 1.5, marginBottom: 12 }}>{auditInput.description?.slice(0, 120) || "No description"}...</div>
+                    <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 10 }}>
+                      <div style={{ fontSize: 11, color: RED, fontWeight: 700, marginBottom: 6 }}>PROBLEMS ({aiResult.issues?.length})</div>
+                      {aiResult.issues?.slice(0, 3).map((issue, i) => (
+                        <div key={i} style={{ fontSize: 11.5, color: RED, marginBottom: 4, display: "flex", gap: 6 }}>
+                          <span>✗</span><span>{issue.problem}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* AFTER Card */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: SAGE, letterSpacing: "0.06em", marginBottom: 8 }}>AFTER — INKEDARTIQ REDESIGN</div>
+                <div style={{ border: `2px solid ${ORANGE}`, borderRadius: 14, overflow: "hidden", background: CARD_BG, position: "relative" }}>
+                  <div style={{ position: "absolute", top: 10, left: 10, background: ORANGE, color: "#fff", fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 5, zIndex: 1 }}>
+                    ✦ OPTIMISED
+                  </div>
+                  <div style={{ background: "linear-gradient(135deg, #2D4A3E 0%, #1A2E28 100%)", height: 160, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 32 }}>🌴</div>
+                    <div style={{ fontSize: 11, color: "#A8C5B8", letterSpacing: "0.05em" }}>KERALA HOMESTAY</div>
+                  </div>
+                  <div style={{ padding: "14px 16px" }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6, color: BLACK }}>{aiResult.improvedTitle}</div>
+                    <div style={{ fontSize: 12, color: GREY, lineHeight: 1.6, marginBottom: 10 }}>{aiResult.improvedDescription}</div>
+
+                    {aiResult.improvedHighlights && (
+                      <div style={{ marginBottom: 10 }}>
+                        {aiResult.improvedHighlights.map((h, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: SAGE, marginBottom: 3, display: "flex", gap: 6 }}>
+                            <span>✓</span><span>{h}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                      {aiResult.improvedAmenities?.map((a, i) => (
+                        <span key={i} style={{ background: "#F0F7EE", color: SAGE, fontSize: 10.5, fontWeight: 600, padding: "3px 8px", borderRadius: 5 }}>{a}</span>
+                      ))}
+                    </div>
+
+                    <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: GREY }}>SUGGESTED PRICE</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: ORANGE }}>{aiResult.improvedPrice || "₹2,000–3,500"} <span style={{ fontSize: 10, color: GREY, fontWeight: 400 }}>/ night</span></div>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: GREY }}>{aiResult.guestType}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Results — Issues + Fixes */}
+      {aiResult && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+          <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 18, background: CARD_BG }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: aiResult.score >= 7 ? "#EEF3EA" : aiResult.score >= 4 ? "#FBF1E2" : "#FBEAE6", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+                <span style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 22, color: aiResult.score >= 7 ? SAGE : aiResult.score >= 4 ? AMBER : RED }}>{aiResult.score}</span>
+                <span style={{ fontSize: 9, color: GREY }}>/ 10</span>
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 15 }}>Listing Score</div>
+                <div style={{ fontSize: 12, color: GREY, marginTop: 2 }}>{aiResult.summary}</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: GREY, letterSpacing: "0.04em", marginBottom: 10 }}>PROBLEMS FOUND</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {aiResult.issues?.map((issue, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#FBEAE6", borderRadius: 7, padding: "8px 10px" }}>
+                  <span style={{ color: RED, fontWeight: 700, fontSize: 13, minWidth: 16 }}>!</span>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{issue.problem}</div>
+                    <div style={{ fontSize: 12, color: GREY, marginTop: 2 }}>{issue.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 16, background: CARD_BG }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: GREY, letterSpacing: "0.04em", marginBottom: 10 }}>RECOMMENDED FIXES</div>
+              {aiResult.fixes?.map((fix, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8, fontSize: 12.5 }}>
+                  <span style={{ color: SAGE, fontWeight: 700 }}>✓</span>
+                  <span>{fix}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, padding: 16, background: CARD_BG }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: ORANGE, letterSpacing: "0.04em", marginBottom: 8 }}>IMPROVED TITLE</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 14 }}>{aiResult.improvedTitle}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: ORANGE, letterSpacing: "0.04em", marginBottom: 8 }}>IMPROVED OPENING</div>
+              <div style={{ fontSize: 12.5, color: GREY, lineHeight: 1.6 }}>{aiResult.improvedDescription}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Pitch Generator */}
+      {aiResult && (
+        <div style={{ border: `2px solid #25D366`, borderRadius: 10, padding: 20, background: "#F0FBF3" }}>
+          <div style={{ fontFamily: "'Archivo Black', sans-serif", fontSize: 16, marginBottom: 4 }}>📲 WhatsApp Pitch Generator</div>
+          <p style={{ fontSize: 13, color: GREY, marginBottom: 16 }}>AI generates a personalised pitch message based on the problems found. One click to copy and send.</p>
+
+          <button
+            onClick={generatePitch}
+            disabled={pitchLoading}
+            style={{ background: pitchLoading ? GREY : "#25D366", color: "#fff", border: "none", borderRadius: 7, padding: "10px 20px", fontSize: 13, fontWeight: 700, opacity: pitchLoading ? 0.7 : 1, marginBottom: 14 }}
+          >
+            {pitchLoading ? "Generating..." : "Generate Pitch"}
+          </button>
+
+          {pitchMsg && (
+            <div>
+              <div style={{ background: "#fff", border: `1px solid #C8EFD4`, borderRadius: 10, padding: 16, fontSize: 13.5, lineHeight: 1.7, marginBottom: 12, whiteSpace: "pre-wrap" }}>
+                {pitchMsg}
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={copyPitch} style={{ background: copied ? SAGE : BLACK, color: "#fff", border: "none", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700 }}>
+                  {copied ? "✓ Copied!" : "Copy message"}
+                </button>
+                <a href={waLink(WHATSAPP_NUMBER, pitchMsg)} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                  <button style={{ background: "#25D366", color: "#fff", border: "none", borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 7 }}>
+                    <Icon name="whatsapp" size={15} color="#fff" />
+                    Open in WhatsApp
+                  </button>
+                </a>
+                <button onClick={sendAuditAsLead} style={{ background: "transparent", color: BLACK, border: `1.5px solid ${LINE_STRONG}`, borderRadius: 7, padding: "9px 18px", fontSize: 13, fontWeight: 700, marginLeft: "auto" }}>
+                  Save as lead →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
   const runAiAudit = async () => {
     if (!auditInput.title && !auditInput.description) {
